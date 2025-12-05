@@ -1,15 +1,10 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const OpenAI = require("openai");
+const axios = require("axios");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// Create OpenAI client using API key from env var
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
 
 app.use(cors());
 app.use(express.json());
@@ -34,7 +29,6 @@ app.post("/evaluate", async (req, res) => {
       });
     }
 
-    // HARD server-side word limit
     const maxWords = 1000;
     const words = essay.trim().split(/\s+/);
     if (words.length > maxWords) {
@@ -50,7 +44,6 @@ app.post("/evaluate", async (req, res) => {
       });
     }
 
-    // Choose tone based on mode
     let toneInstruction;
     switch (mode) {
       case "direct":
@@ -59,12 +52,12 @@ app.post("/evaluate", async (req, res) => {
         break;
       case "balanced":
         toneInstruction =
-          "Balance encouragement with clear critique. Point out strengths and weaknesses.";
+          "Balance encouragement with clear critique. Point out both strengths and weaknesses.";
         break;
       case "gentle":
       default:
         toneInstruction =
-          "Be gentle and encouraging. Focus mainly on strengths and small,具体 suggestions.";
+          "Be gentle and encouraging. Focus mainly on strengths and a few small, concrete suggestions.";
         break;
     }
 
@@ -83,14 +76,26 @@ User essay:
 """${essay}"""
 `;
 
-    const response = await openai.responses.create({
-      model: "gpt-4.1-mini",
-      input: prompt,
-      max_output_tokens: 400,
-    });
+    const apiResponse = await axios.post(
+      "https://api.openai.com/v1/responses",
+      {
+        model: "gpt-4.1-mini",
+        input: prompt,
+        max_output_tokens: 400,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 20000,
+      }
+    );
 
-    const output = response.output[0]?.content[0]?.text || "";
-    const tokensUsed = response.usage?.total_tokens ?? null;
+    const data = apiResponse.data;
+    const output =
+      data.output?.[0]?.content?.[0]?.text || "No feedback generated.";
+    const tokensUsed = data.usage?.total_tokens ?? null;
 
     res.json({
       feedback: output,
@@ -98,9 +103,17 @@ User essay:
       tokens_used: tokensUsed,
     });
   } catch (error) {
-    console.error("Error in /evaluate:", error);
+    console.error("Error in /evaluate:", error.response?.data || error.message);
 
-    return res.status(500).json({
+    // If OpenAI returned an error, surface a clean message
+    if (error.response && error.response.data) {
+      return res.status(502).json({
+        error: "OpenAI API error",
+        details: error.response.data,
+      });
+    }
+
+    res.status(500).json({
       error: "Something went wrong while generating feedback.",
     });
   }
