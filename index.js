@@ -18,34 +18,27 @@ app.get("/health", (req, res) => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// EVALUATE ENDPOINT — FIXED TO USE "essay" INSTEAD OF "essayText"
-// ---------------------------------------------------------------------------
+// Evaluate endpoint
 app.post("/evaluate", async (req, res) => {
   try {
-    // Accept EXACTLY what Flutter sends:
-    // {
-    //   "essay": "...",
-    //   "mode": "gentle"
-    // }
     const {
       taskTitle,
       quote,
       instruction,
-      essay,       // <-- FIXED: use essay (Flutter field)
-      mode,
+      essayText,
+      mode, // "soberSoft" | "soberBrother" | "soberCoach" | "gentle" | "balanced" | "direct"
     } = req.body || {};
 
     // -----------------------------
     // BASIC VALIDATION
     // -----------------------------
-    if (!essay || typeof essay !== "string") {
+    if (!essayText || typeof essayText !== "string" || !essayText.trim()) {
       return res.status(400).json({
-        error: "Missing or invalid 'essay'",
+        error: "Missing or invalid 'essayText'",
       });
     }
 
-    const trimmedEssay = essay.trim();
+    const trimmedEssay = essayText.trim();
     const words = trimmedEssay.length === 0 ? [] : trimmedEssay.split(/\s+/);
     const wordCount = words.filter(Boolean).length;
 
@@ -64,7 +57,7 @@ app.post("/evaluate", async (req, res) => {
     }
 
     // -----------------------------
-    // TONE INSTRUCTION (UNCHANGED)
+    // TONE INSTRUCTION (MentorStyle mirror)
     // -----------------------------
     let toneInstruction;
 
@@ -117,6 +110,7 @@ Always speak directly to the user as "you". Never say "the writer" or "the autho
 `;
         break;
 
+      // GENTLE (default for Start Here + Sobriety)
       case "gentle":
       default:
         toneInstruction = `
@@ -124,69 +118,154 @@ You are a very gentle, validating reflective mentor.
 
 Always speak directly to the user as "you". Never say "the writer", "the student", or "the author".
 
-The app will also tell you the current essay word count and the recommended minimum for deeper reflection (30 words).
+Your primary job is to:
+- Acknowledge whatever they managed to write, even if it is very short.
+- Reflect back what you hear in a calm, grounded tone.
+- Offer one or two soft suggestions or questions they might explore later.
 
-If the essay has fewer than 30 words:
-- Start by acknowledging that the user wrote something at all.
-- Be very encouraging, not critical.
-- Gently mention how many more words would probably help deepen the reflection.
-  For example: "You are about 12 words short of a fuller picture. If you feel able, you could add a little more detail."
-- Give only light feedback (one or two observations), and clearly invite them to expand and resubmit any time.
-
-If the essay has 30 words or more:
-- Give your full feedback as usual: highlight strengths, point out what could be made clearer or deeper, and suggest one or two ways to improve.
-- Do NOT mention word count in this case.
-- Keep your tone kind, human, and non-judgmental.
-
-In gentle mode, avoid using harsh labels like "weak", "poor", "bad", or "fails".
+Do NOT:
+- Mention word counts or length.
+- Tell them they need to write more or are "short" of anything.
+- Give scores, grades, or numeric ratings.
+- Use hype, exclamation marks, or therapy clichés.
 `;
         break;
     }
 
     // -----------------------------
-    // ESSAY SECTION (UNCHANGED)
+    // ESSAY SECTION (no word-count text)
     // -----------------------------
-    let essaySection;
-    if (mode === "gentle") {
-      essaySection = `
-Essay word count: ${wordCount}
-Recommended minimum for deeper reflection: 30 words.
-
+    const essaySection = `
 STUDENT ESSAY
-${essay}
+${essayText}
+`;
+
+    // -----------------------------
+    // PROMPT: GENTLE vs SCORED MODES
+    // -----------------------------
+    let prompt;
+
+    if (mode === "gentle" || !mode) {
+      // GENTLE MODE: NO SCORES, NO WORD COUNT, NO PRESSURE
+      prompt = `
+You are an AI writing mentor, specialising in philosophical and reflective writing.
+
+${toneInstruction}
+
+GENERAL FEEDBACK RULES FOR GENTLE MODE
+
+1) Treat this as someone opening up about something real in their life.
+2) Respect the current amount of writing; never pressure them for more.
+3) Focus on emotional safety and clarity, not performance.
+4) Keep your response short: 1–3 short paragraphs.
+5) Use simple, human language.
+
+Give feedback that:
+- Briefly reflects what they seem to be feeling or wrestling with.
+- Highlights one or two things they are already doing well in their reflection (for example: honesty, specificity, noticing patterns).
+- Gently offers one or two questions or angles they COULD explore further if they ever feel ready, without urgency or obligation.
+
+Do NOT:
+- Mention word count, length, or "more detail".
+- Give any numeric scores or talk about grades or quality levels.
+- Sound like a therapist or motivational coach. Stay plain and honest.
+
+TASK
+Title: ${taskTitle || ""}
+Quote: "${quote || ""}"
+Instruction: ${instruction || ""}
+
+${essaySection}
+
+Return ONLY the feedback text as 1–3 short paragraphs.
+Do not add headings, bullet points, scores, or quotes.
 `;
     } else {
-      essaySection = `
-STUDENT ESSAY
-${essay}
-`;
-    }
-
-    // -----------------------------
-    // FULL PROMPT (UNCHANGED)
-    // -----------------------------
-    const prompt = `
+      // ALL OTHER MODES: KEEP THE ORIGINAL SCORING + QUOTE LOGIC
+      prompt = `
 You are an AI writing mentor, specialising in philosophical and reflective writing.
 
 ${toneInstruction}
 
 GENERAL FEEDBACK RULES
-[... EXACTLY AS BEFORE, no changes ...]
+
+1) Always address the user directly as "you". Do NOT use distancing phrases like "the writer", "the author", or "the student".
+2) Start by understanding what the user is really trying to say, not just judging the structure.
+3) Structure your response exactly in the format requested below.
+4) Highlight strengths first, then improvements.
+5) Keep feedback specific, not generic.
+
+COUNTERVIEW (ALTERNATIVE PERSPECTIVE) RULES
+
+- Consider whether the user's essay argues mainly from one side of an issue.
+- If they already show genuine awareness of the opposite perspective and discuss it fairly, you may skip the alternative perspective.
+- If they clearly have not considered the opposite perspective in depth:
+  - Briefly introduce a reasonable alternative view as a thought experiment, not as a correction.
+  - This alternative perspective must be woven naturally into the Summary paragraph, not placed inside Strengths or Improvements.
+  - Do NOT label it as "opposite view" or create a new heading for it.
+  - Use soft transitions such as:
+      "You might also consider that..."
+      "Another angle you could explore is..."
+      "Some people in your situation might see it this way..."
+- The purpose of the alternative perspective is to expand their lens, not to win a debate or prove them wrong.
+
+QUOTE REWARD RULES
+
+You may optionally include a short, real quote at the end as a "reflection echo" reward, but only if ALL of the following are true:
+- The essay tone is calm, reflective, and reasonably coherent (not a rant, not chaotic, not in obvious distress).
+- The user does not appear to be in crisis, extreme anger, or deep despair.
+- The content feels like thoughtful reflection rather than raw emotional bleeding.
+
+When you DO include a quote:
+- It must be a REAL, well-known quote from a non-extremist source (for example: philosophers, psychologists, poets, classic authors).
+- NEVER use or quote Adolf Hitler, "Mein Kampf", Nazis, fascist writers, extremist manifestos, hate groups, or violent ideologies.
+- Avoid religious fundamentalist or preachy content.
+- The quote must be SHORT (1–2 lines) and thematically related to the user's reflection.
+- Do NOT invent or "hallucinate" a quote. If you are not confident that a quote is accurate and from a safe, well-known source, output NONE instead.
+
+If any of the safety or tone conditions are not met, or you are unsure:
+- Do NOT include a quote. Output "Quote: NONE".
+
+TASK
+Title: ${taskTitle || ""}
+Quote: "${quote || ""}"
+Instruction: ${instruction || ""}
+
+${essaySection}
+
+Mark this essay from 0 to 10, where:
+0–3  : very weak, vague, no depth
+4–6  : mixed, some insight but poorly structured or shallow
+7–8  : solid, clear, honest, and reasonably deep
+9–10 : exceptional clarity, depth, and self-honesty
+
+Return your result in EXACTLY this plain-text format:
+
+Score: <number between 0 and 10>
+Summary: <3–5 sentences, including any gentle alternative perspective if needed>
+Strengths:
+- <one short bullet>
+- <one short bullet>
+Improvements:
+- <one short bullet>
+- <one short bullet>
 Quote: <a short real quote with attribution, OR the word NONE>
 
 Remember:
+
 - Do not add new sections beyond Score, Summary, Strengths, Improvements, and Quote.
 `;
+    }
 
     // -----------------------------
-    // CALL OPENAI (UNCHANGED)
+    // CALL OPENAI
     // -----------------------------
     const apiResponse = await axios.post(
       "https://api.openai.com/v1/responses",
       {
         model: "gpt-4.1-mini",
         input: prompt,
-        max_output_tokens: 600,
+        max_output_tokens: mode === "gentle" || !mode ? 400 : 600,
       },
       {
         headers: {
@@ -203,12 +282,11 @@ Remember:
       "No feedback generated.";
     const tokensUsed = data?.usage?.total_tokens ?? null;
 
-    // Return raw feedback (expected by Flutter)
+    // For now we always return raw feedback text.
     res.json({
       feedback: text,
       tokens_used: tokensUsed,
     });
-
   } catch (error) {
     console.error("Error in /evaluate:", error.response?.data || error.message);
 
