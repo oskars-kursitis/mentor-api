@@ -25,7 +25,7 @@ app.post("/evaluate", async (req, res) => {
       taskTitle,
       quote,
       instruction,
-      essayText,
+      essay: essayText,
       mode, // "soberSoft" | "soberBrother" | "soberCoach" | "gentle" | "balanced" | "direct"
     } = req.body || {};
 
@@ -34,7 +34,7 @@ app.post("/evaluate", async (req, res) => {
     // -----------------------------
     if (!essayText || typeof essayText !== "string" || !essayText.trim()) {
       return res.status(400).json({
-        error: "Missing or invalid 'essayText'",
+        error: "Missing or invalid 'essay'",
       });
     }
 
